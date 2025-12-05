@@ -192,7 +192,9 @@ def parse_args(argv=None):
     )
     parser.add_argument(
         "output_path",
-        help="Path to the aggregated output file (will be overwritten).",
+        nargs="?",
+        default=None,
+        help="Path to the aggregated output file (will be overwritten). If omitted, a file named '<project_name>.txt' will be created in the current directory.",
     )
     parser.add_argument(
         "--max-size-mb",
@@ -205,8 +207,18 @@ def parse_args(argv=None):
 
 if __name__ == "__main__":
     args = parse_args()
+
+    # If no output path provided, derive a filename from the project root directory name
+    if args.output_path is None:
+        project_name = os.path.basename(os.path.normpath(args.root_dir))
+        if not project_name:
+            project_name = "aggregated"
+        output_path = os.path.abspath(f"{project_name}.txt")
+    else:
+        output_path = args.output_path
+
     aggregate_project_files(
         root_dir=args.root_dir,
-        output_path=args.output_path,
+        output_path=output_path,
         max_file_size_mb=args.max_size_mb,
     )
