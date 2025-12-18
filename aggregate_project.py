@@ -63,6 +63,7 @@ def aggregate_project_files(
     root_dir: str,
     output_path: str,
     max_file_size_mb: float = 5.0,
+    include_git_workflows: bool = True,
 ) -> None:
     """
     Recursively walk a project tree and aggregate (mostly) text files into a single file.
@@ -104,9 +105,39 @@ def aggregate_project_files(
     files_skipped_size = 0
     files_skipped_binary = 0
     files_failed = 0
+    workflows_included = 0
 
     # Open output file once and stream all writes
     with open(output_path, "w", encoding="utf-8", errors="replace") as out_f:
+        # Optionally include GitHub Actions workflows first (dedicated section)
+        if include_git_workflows:
+            workflows_dir = os.path.join(root_dir, ".github", "workflows")
+            if os.path.isdir(workflows_dir):
+                try:
+                    for wf_name in sorted(os.listdir(workflows_dir)):
+                        if not (wf_name.endswith(".yml") or wf_name.endswith(".yaml")):
+                            continue
+                        wf_path = os.path.join(workflows_dir, wf_name)
+                        try:
+                            with open(wf_path, "r", encoding="utf-8", errors="replace") as wf_f:
+                                wf_content = wf_f.read()
+                        except Exception as e:
+                            print(f"[WARN] Failed to read workflow {wf_path}: {e}", file=sys.stderr)
+                            files_failed += 1
+                            continue
+
+                        rel_path = os.path.relpath(wf_path, root_dir)
+                        out_f.write("========================================\n")
+                        out_f.write(f"GIT WORKFLOW: {rel_path}\n")
+                        out_f.write("========================================\n\n")
+                        out_f.write(wf_content)
+                        if not wf_content.endswith("\n"):
+                            out_f.write("\n")
+                        out_f.write("\n")
+                        workflows_included += 1
+                except OSError:
+                    pass
+
         for current_root, dirs, files in os.walk(root_dir):
             # Strip out directories we don't want to descend into
             dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
@@ -176,6 +207,8 @@ def aggregate_project_files(
         print("[INFO] Aggregation complete.")
         print(f"[INFO] Files seen:            {files_seen}")
         print(f"[INFO] Files aggregated:      {files_aggregated}")
+        if include_git_workflows:
+            print(f"[INFO] Git workflows included: {workflows_included}")
         print(f"[INFO] Files skipped (size):  {files_skipped_size}")
         print(f"[INFO] Files skipped (binary):{files_skipped_binary}")
         print(f"[INFO] Files failed to read:  {files_failed}")
@@ -202,6 +235,12 @@ def parse_args(argv=None):
         default=5.0,
         help="Maximum file size in MB to include (default: 5.0).",
     )
+    parser.add_argument(
+        "--no-git-workflows",
+        dest="include_git_workflows",
+        action="store_false",
+        help="Do not include files from .github/workflows in the aggregated output.",
+    )
     return parser.parse_args(argv)
 
 
@@ -221,4 +260,5 @@ if __name__ == "__main__":
         root_dir=args.root_dir,
         output_path=output_path,
         max_file_size_mb=args.max_size_mb,
+        include_git_workflows=args.include_git_workflows,
     )
