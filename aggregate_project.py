@@ -1,7 +1,12 @@
 import os
 import sys
 import argparse
-from typing import Set
+from typing import Optional, Set
+
+try:
+    from pathspec import PathSpec
+except ImportError:  # pragma: no cover - runtime dependency check
+    PathSpec = None
 
 
 # Directory names to skip regardless of where they appear in the tree
@@ -100,6 +105,8 @@ def aggregate_project_files(
     print(f"[INFO] Max file size:  {max_file_size_mb:.2f} MB")
     print()
 
+    gitignore_spec = load_gitignore_spec(root_dir)
+
     files_seen = 0
     files_aggregated = 0
     files_skipped_size = 0
@@ -142,6 +149,18 @@ def aggregate_project_files(
             # Strip out directories we don't want to descend into
             dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
 
+            # Apply .gitignore patterns to directory traversal
+            if gitignore_spec is not None:
+                rel_root = os.path.relpath(current_root, root_dir)
+                if rel_root == ".":
+                    rel_root = ""
+                filtered_dirs = []
+                for d in dirs:
+                    rel_dir_path = os.path.join(rel_root, d).replace("\\", "/")
+                    if not gitignore_spec.match_file(rel_dir_path + "/"):
+                        filtered_dirs.append(d)
+                dirs[:] = filtered_dirs
+
             rel_dir = os.path.relpath(current_root, root_dir)
             if rel_dir == ".":
                 rel_dir_display = "."
@@ -158,6 +177,13 @@ def aggregate_project_files(
                 if os.path.abspath(file_path) == output_path:
                     print(f"[DEBUG] Skipping output file: {file_path}")
                     continue
+
+                # Skip files excluded by .gitignore
+                if gitignore_spec is not None:
+                    rel_path = os.path.relpath(file_path, root_dir).replace("\\", "/")
+                    if gitignore_spec.match_file(rel_path):
+                        print(f"[DEBUG] Skipping gitignored file: {file_path}")
+                        continue
 
                 # Check size first to avoid huge files
                 try:
@@ -242,6 +268,28 @@ def parse_args(argv=None):
         help="Do not include files from .github/workflows in the aggregated output.",
     )
     return parser.parse_args(argv)
+
+
+def load_gitignore_spec(root_dir: str) -> Optional["PathSpec"]:
+    if PathSpec is None:
+        print(
+            "[ERROR] Missing dependency 'pathspec'. Install with: pip install pathspec",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    gitignore_path = os.path.join(root_dir, ".gitignore")
+    if not os.path.isfile(gitignore_path):
+        return None
+
+    try:
+        with open(gitignore_path, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.read().splitlines()
+    except Exception as e:
+        print(f"[WARN] Failed to read .gitignore: {e}", file=sys.stderr)
+        return None
+
+    return PathSpec.from_lines("gitwildmatch", lines)
 
 
 if __name__ == "__main__":
