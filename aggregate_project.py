@@ -40,6 +40,7 @@ SKIP_DIRS: Set[str] = {
     ".git",
     ".svn",
     ".hg",
+    ".venv",
     "__pycache__",
 }
 
